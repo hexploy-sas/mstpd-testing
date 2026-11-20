@@ -28,10 +28,12 @@ check_PROGRAMS = \
 	tests/test_digest \
 	tests/test_portcost \
 	tests/test_mst_tcn_discarding \
+	tests/test_sim_rstp_ring \
 	$(NULL)
 TESTS = $(check_PROGRAMS)
 
-TEST_COMMON = tests/common.c tests/common.h hmac_md5.c mstp.c mstp.h
+TEST_COMMON = tests/common.c tests/common.h tests/stp_params.h hmac_md5.c \
+	mstp.c mstp.h
 
 tests_test_digest_SOURCES = $(TEST_COMMON) tests/test_digest.c
 tests_test_digest_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
@@ -44,6 +46,10 @@ tests_test_portcost_LDADD = $(CMOCKA_LIBS)
 tests_test_mst_tcn_discarding_SOURCES = $(TEST_COMMON) tests/test_mst_tcn_discarding.c
 tests_test_mst_tcn_discarding_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
 tests_test_mst_tcn_discarding_LDADD = $(CMOCKA_LIBS)
+
+tests_test_sim_rstp_ring_SOURCES = $(TEST_COMMON) tests/test_sim_rstp_ring.c
+tests_test_sim_rstp_ring_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_sim_rstp_ring_LDADD = $(CMOCKA_LIBS)
 
 EXTRA_DIST = bridge-stp.in utils/ifupdown.sh.in utils/mstp_config_bridge.in \
 	utils/mstpd.service.in utils/bash_completion utils/nm-dispatcher.in \
