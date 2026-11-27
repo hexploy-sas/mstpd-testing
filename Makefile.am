@@ -141,7 +141,8 @@ tests_test_sim_stp_interop_LDADD = $(CMOCKA_LIBS)
 
 # ftest-sys: real mstpd and mstpctl against the kernel bridge, run by
 # make check-sys (needs kernel >= 7.1 and user namespaces, or root)
-SYS_TESTS = tests/sys/ftest_ring tests/sys/ftest_neighbour
+SYS_TESTS = tests/sys/ftest_ring tests/sys/ftest_neighbour \
+	tests/sys/ftest_ports tests/sys/ftest_helper
 EXTRA_PROGRAMS = $(SYS_TESTS)
 SYS_LIB = tests/sys/lib/sys.c tests/sys/lib/sys.h tests/stp_params.h \
 	libnetlink.c
@@ -156,17 +157,36 @@ tests_sys_ftest_neighbour_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS) \
 	-I$(srcdir)/tests/sys/lib -I$(srcdir)/tests
 tests_sys_ftest_neighbour_LDADD = $(CMOCKA_LIBS)
 
-check-sys: mstpd mstpctl $(SYS_TESTS)
+tests_sys_ftest_ports_SOURCES = $(SYS_LIB) tests/sys/ftest_ports.c
+tests_sys_ftest_ports_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS) \
+	-I$(srcdir)/tests/sys/lib -I$(srcdir)/tests
+tests_sys_ftest_ports_LDADD = $(CMOCKA_LIBS)
+
+tests_sys_ftest_helper_SOURCES = $(SYS_LIB) tests/sys/ftest_helper.c
+tests_sys_ftest_helper_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS) \
+	-I$(srcdir)/tests/sys/lib -I$(srcdir)/tests
+tests_sys_ftest_helper_LDADD = $(CMOCKA_LIBS)
+
+check-sys: mstpd mstpctl bridge-stp $(SYS_TESTS)
 	@fail=0; for t in $(SYS_TESTS); do \
 	  echo "== $$t"; \
 	  MSTPD=$(abs_top_builddir)/mstpd MSTPCTL=$(abs_top_builddir)/mstpctl \
+	  BRIDGE_STP=$(abs_top_builddir)/bridge-stp \
 	  FTEST_LOGDIR=$(abs_top_builddir)/ftest-logs ./$$t || fail=1; \
 	done; exit $$fail
+
+# all ftest-sys tests as root in a disposable virtme-ng VM, including those
+# that need the init network namespace (kernel STP helper)
+VNG = vng
+VNG_KERNEL = -r
+check-sys-vm: mstpd mstpctl bridge-stp $(SYS_TESTS)
+	$(VNG) $(VNG_KERNEL) --rwdir=$(abs_top_builddir) -- \
+	  env FTEST_VM=1 $(MAKE) -C $(abs_top_builddir) check-sys
 
 clean-local:
 	rm -rf ftest-logs
 
-.PHONY: check-sys
+.PHONY: check-sys check-sys-vm
 
 EXTRA_DIST = bridge-stp.in utils/ifupdown.sh.in utils/mstp_config_bridge.in \
 	utils/mstpd.service.in utils/bash_completion utils/nm-dispatcher.in \

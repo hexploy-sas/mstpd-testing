@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <fcntl.h>
 #include <sched.h>
 #include <signal.h>
@@ -36,6 +38,7 @@
 #define CTL_RETRY_MS 3000
 
 static bool ready;
+static bool host_mode;
 static const char *skip_reason = "environment not initialised";
 static int base_netns = -1;
 static struct rtnl_handle base_rth;
@@ -127,6 +130,26 @@ int sys_init(void)
     if (mkdir(logdir, 0755) && errno != EEXIST)
         return not_ready("cannot create log directory");
 
+    ready = true;
+    return 0;
+}
+
+int sys_init_host(void)
+{
+    const char *dir = getenv("FTEST_LOGDIR");
+
+    /* this mode changes the init network namespace and /sbin: only in a
+     * disposable VM */
+    if (geteuid() != 0 || !getenv("FTEST_VM"))
+        return not_ready("needs root in a disposable VM (FTEST_VM=1), "
+                         "see make check-sys-vm");
+    base_netns = open("/proc/self/ns/net", O_RDONLY | O_CLOEXEC);
+    if (base_netns < 0 || rtnl_open(&base_rth, 0) < 0)
+        return not_ready("cannot open network namespace");
+    snprintf(logdir, sizeof(logdir), "%s", dir ? dir : "ftest-logs");
+    if (mkdir(logdir, 0755) && errno != EEXIST)
+        return not_ready("cannot create log directory");
+    host_mode = true;
     ready = true;
     return 0;
 }
@@ -315,9 +338,12 @@ int dut_link(struct dut *a, const char *aport, struct dut *b, const char *bport)
     return 0;
 }
 
-/* child process in the DUT namespace, with a sysfs that shows it */
+/* child process in the DUT namespace, with a sysfs that shows it (in host
+ * mode the DUT is the init namespace, already shown by /sys) */
 static void enter_dut(struct dut *d)
 {
+    if (host_mode)
+        return;
     if (setns(d->netns, CLONE_NEWNET) || unshare(CLONE_NEWNS)
         || mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL)
         || mount("sysfs", "/sys", "sysfs", 0, NULL))
@@ -379,11 +405,10 @@ int dut_ctl(struct dut *d, char *out, size_t outlen, ...)
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
-int dut_start(struct dut *d)
+int dut_start_mstpd(struct dut *d)
 {
-    char maxage[8], fdelay[8];
     long start;
-    int fd, i;
+    int fd;
 
     d->mstpd = fork();
     if (d->mstpd < 0)
@@ -395,18 +420,34 @@ int dut_start(struct dut *d)
             dup2(fd, STDOUT_FILENO);
             dup2(fd, STDERR_FILENO);
         }
+        /* line-buffered output, so that the log is complete while mstpd
+         * runs */
+        execlp("stdbuf", "stdbuf", "-oL", "-eL", bin("MSTPD", "./mstpd"),
+               "-d", "-v", bin("FTEST_MSTPD_LOGLEVEL", "2"), (char *)NULL);
         execl(bin("MSTPD", "./mstpd"), "mstpd", "-d", "-v",
               bin("FTEST_MSTPD_LOGLEVEL", "2"), (char *)NULL);
         _exit(127);
     }
 
-    /* the control socket is up once addbridge answers */
+    /* the control socket is up once mstpd answers; debuglevel needs no
+     * bridge and keeps the level given at start */
     start = sys_now_ms();
-    while (dut_ctl(d, NULL, 0, "addbridge", "br0", (char *)NULL)) {
+    while (dut_ctl(d, NULL, 0, "debuglevel",
+                   bin("FTEST_MSTPD_LOGLEVEL", "2"), (char *)NULL)) {
         if (sys_now_ms() - start > CTL_RETRY_MS)
             return -1;
         usleep(50000);
     }
+    return 0;
+}
+
+int dut_start(struct dut *d)
+{
+    char maxage[8], fdelay[8];
+
+    if (dut_start_mstpd(d)
+        || dut_ctl(d, NULL, 0, "addbridge", "br0", (char *)NULL))
+        return -1;
 
     /* Max Age before Forward Delay: 2 * (Forward Delay - 1) >= Max Age */
     snprintf(maxage, sizeof(maxage), "%d", SYS_MAX_AGE);
@@ -414,6 +455,13 @@ int dut_start(struct dut *d)
     if (dut_ctl(d, NULL, 0, "setmaxage", "br0", maxage, (char *)NULL)
         || dut_ctl(d, NULL, 0, "setfdelay", "br0", fdelay, (char *)NULL))
         return -1;
+
+    return dut_ports_up(d);
+}
+
+int dut_ports_up(struct dut *d)
+{
+    int i;
 
     for (i = 0; i < d->nports; i++)
         if (set_link(d, d->ports[i], true, 0))
@@ -760,4 +808,308 @@ void vnb_make_bpdu(void *buf, unsigned int flags, uint16_t root_prio,
     b->MaxAge[0] = SYS_MAX_AGE;
     b->HelloTime[0] = HELLO_TIME;
     b->ForwardDelay[0] = SYS_FWD_DELAY;
+}
+
+/* host mode (VM): DUT in the init namespace, STP through the kernel helper */
+
+#define HELPER_PATH "/sbin/bridge-stp"
+
+/* the build's bridge-stp with the mstpd and mstpctl paths of the build */
+int sys_install_helper(void)
+{
+    const char *src = bin("BRIDGE_STP", "./bridge-stp");
+    char line[512], path[PATH_MAX];
+    FILE *in, *out;
+
+    if (!getenv("FTEST_VM"))
+        return -1;
+    in = fopen(src, "r");
+    out = fopen(HELPER_PATH, "w");
+    if (!in || !out) {
+        if (in)
+            fclose(in);
+        if (out)
+            fclose(out);
+        return -1;
+    }
+    while (fgets(line, sizeof(line), in)) {
+        if (!strncmp(line, "mstpctl=", 8))
+            fprintf(out, "mstpctl='%s'\n",
+                    realpath(bin("MSTPCTL", "./mstpctl"), path));
+        else if (!strncmp(line, "mstpd=", 6))
+            fprintf(out, "mstpd='%s'\n",
+                    realpath(bin("MSTPD", "./mstpd"), path));
+        else
+            fputs(line, out);
+    }
+    fclose(in);
+    if (fclose(out) || chmod(HELPER_PATH, 0755))
+        return -1;
+    return 0;
+}
+
+void sys_kill_mstpd(void)
+{
+    char path[64], comm[32];
+    struct dirent *e;
+    DIR *dir;
+    FILE *f;
+    int pid;
+
+    dir = opendir("/proc");
+    if (!dir)
+        return;
+    while ((e = readdir(dir))) {
+        pid = atoi(e->d_name);
+        if (pid <= 0)
+            continue;
+        snprintf(path, sizeof(path), "/proc/%d/comm", pid);
+        f = fopen(path, "r");
+        if (!f)
+            continue;
+        if (fgets(comm, sizeof(comm), f) && !strcmp(comm, "mstpd\n"))
+            kill(pid, SIGKILL);
+        fclose(f);
+    }
+    closedir(dir);
+    usleep(100000);
+}
+
+bool sys_mstpd_running(void)
+{
+    char path[64], comm[32];
+    struct dirent *e;
+    bool found = false;
+    DIR *dir;
+    FILE *f;
+    int pid;
+
+    dir = opendir("/proc");
+    if (!dir)
+        return false;
+    while (!found && (e = readdir(dir))) {
+        pid = atoi(e->d_name);
+        if (pid <= 0)
+            continue;
+        snprintf(path, sizeof(path), "/proc/%d/comm", pid);
+        f = fopen(path, "r");
+        if (!f)
+            continue;
+        found = fgets(comm, sizeof(comm), f) && !strcmp(comm, "mstpd\n");
+        fclose(f);
+    }
+    closedir(dir);
+    return found;
+}
+
+/* run fn(d, arg) in a child: returns its result, or SYS_BLOCKED if it is
+ * still blocked after timeout_ms (e.g. a kernel deadlock) */
+static int run_bounded(struct dut *d, int (*fn)(struct dut *, void *),
+                       void *arg, long timeout_ms)
+{
+    long start = sys_now_ms();
+    int status;
+    pid_t pid;
+
+    pid = fork();
+    if (pid < 0)
+        return -1;
+    if (pid == 0) {
+        rtnl_close(&d->rth);
+        if (rtnl_open(&d->rth, 0) < 0)
+            _exit(1);
+        _exit(fn(d, arg) ? 1 : 0);
+    }
+    while (waitpid(pid, &status, WNOHANG) == 0) {
+        if (sys_now_ms() - start > timeout_ms)
+            return SYS_BLOCKED;
+        usleep(SYS_POLL_MS * 1000);
+    }
+    return WIFEXITED(status) && !WEXITSTATUS(status) ? 0 : -1;
+}
+
+struct br_args {
+    unsigned char mac_last;
+    bool stp;
+};
+
+static int create_bridge(struct dut *d, void *arg)
+{
+    struct br_args *a = arg;
+    unsigned char mac[6] = { 0x02, 0, 0, 0, 0, a->mac_last };
+    struct rtattr *linkinfo, *data;
+    struct link_req r;
+
+    req_init(&r, RTM_NEWLINK, NLM_F_CREATE | NLM_F_EXCL);
+    r.i.ifi_change = IFF_UP;
+    r.i.ifi_flags = IFF_UP;
+    addattr_l(&r.n, sizeof(r), IFLA_IFNAME, "br0", 4);
+    addattr_l(&r.n, sizeof(r), IFLA_ADDRESS, mac, sizeof(mac));
+    linkinfo = addattr_nest(&r.n, sizeof(r), IFLA_LINKINFO);
+    addattr_l(&r.n, sizeof(r), IFLA_INFO_KIND, "bridge", strlen("bridge"));
+    data = addattr_nest(&r.n, sizeof(r), IFLA_INFO_DATA);
+    addattr32(&r.n, sizeof(r), IFLA_BR_STP_STATE, a->stp);
+    addattr_nest_end(&r.n, data);
+    addattr_nest_end(&r.n, linkinfo);
+    return rtnl_talk(&d->rth, &r.n, NULL) < 0 ? -1 : 0;
+}
+
+int dut_create_host(struct dut *d, const char *name, unsigned char mac_last,
+                    bool stp, long timeout_ms)
+{
+    struct br_args a = { mac_last, stp };
+
+    memset(d, 0, sizeof(*d));
+    snprintf(d->name, sizeof(d->name), "%s", name);
+    snprintf(d->log, sizeof(d->log), "%s/%s.log", logdir, name);
+    unlink(d->log);
+    d->netns = dup(base_netns);
+    if (d->netns < 0 || rtnl_open(&d->rth, 0) < 0)
+        return -1;
+    return run_bounded(d, create_bridge, &a, timeout_ms);
+}
+
+static int set_stp(struct dut *d, void *arg)
+{
+    struct rtattr *linkinfo, *data;
+    struct link_req r;
+
+    req_init(&r, RTM_NEWLINK, 0);
+    r.i.ifi_index = get_ifindex(d, "br0");
+    linkinfo = addattr_nest(&r.n, sizeof(r), IFLA_LINKINFO);
+    addattr_l(&r.n, sizeof(r), IFLA_INFO_KIND, "bridge", strlen("bridge"));
+    data = addattr_nest(&r.n, sizeof(r), IFLA_INFO_DATA);
+    addattr32(&r.n, sizeof(r), IFLA_BR_STP_STATE, *(bool *)arg);
+    addattr_nest_end(&r.n, data);
+    addattr_nest_end(&r.n, linkinfo);
+    return rtnl_talk(&d->rth, &r.n, NULL) < 0 ? -1 : 0;
+}
+
+int dut_set_stp(struct dut *d, bool on, long timeout_ms)
+{
+    return run_bounded(d, set_stp, &on, timeout_ms);
+}
+
+int dut_stp_state(struct dut *d)
+{
+    struct rtattr *tb[IFLA_MAX + 1], *li[IFLA_INFO_MAX + 1];
+    struct rtattr *br[IFLA_BR_MAX + 1];
+    struct nlmsghdr *answer = NULL;
+    struct ifinfomsg *ifi;
+    struct link_req r;
+    int state = -1;
+
+    req_init(&r, RTM_GETLINK, 0);
+    r.n.nlmsg_flags &= ~NLM_F_ACK;
+    addattr_l(&r.n, sizeof(r), IFLA_IFNAME, "br0", 4);
+    if (rtnl_talk(&d->rth, &r.n, &answer) < 0)
+        return -1;
+    ifi = NLMSG_DATA(answer);
+    parse_rtattr_flags(tb, IFLA_MAX, IFLA_RTA(ifi),
+                       answer->nlmsg_len - NLMSG_LENGTH(sizeof(*ifi)),
+                       NLA_F_NESTED);
+    if (tb[IFLA_LINKINFO]) {
+        parse_rtattr_nested(li, IFLA_INFO_MAX, tb[IFLA_LINKINFO]);
+        if (li[IFLA_INFO_DATA]) {
+            parse_rtattr_nested(br, IFLA_BR_MAX, li[IFLA_INFO_DATA]);
+            if (br[IFLA_BR_STP_STATE])
+                state = rta_getattr_u32(br[IFLA_BR_STP_STATE]);
+        }
+    }
+    free(answer);
+    return state;
+}
+
+int dut_del_link(struct dut *d, const char *ifname)
+{
+    struct link_req r;
+    int index = get_ifindex(d, ifname);
+
+    if (index <= 0)
+        return -1;
+    req_init(&r, RTM_DELLINK, 0);
+    r.i.ifi_index = index;
+    return rtnl_talk(&d->rth, &r.n, NULL) < 0 ? -1 : 0;
+}
+
+int dut_add_dummy(struct dut *d, const char *ifname)
+{
+    struct rtattr *linkinfo;
+    struct link_req r;
+    int br = get_ifindex(d, "br0");
+
+    if (br <= 0)
+        return -1;
+    req_init(&r, RTM_NEWLINK, NLM_F_CREATE | NLM_F_EXCL);
+    r.i.ifi_change = IFF_UP;
+    r.i.ifi_flags = IFF_UP;
+    addattr_l(&r.n, sizeof(r), IFLA_IFNAME, ifname, strlen(ifname) + 1);
+    addattr32(&r.n, sizeof(r), IFLA_MASTER, br);
+    linkinfo = addattr_nest(&r.n, sizeof(r), IFLA_LINKINFO);
+    addattr_l(&r.n, sizeof(r), IFLA_INFO_KIND, "dummy", strlen("dummy"));
+    addattr_nest_end(&r.n, linkinfo);
+    return rtnl_talk(&d->rth, &r.n, NULL) < 0 ? -1 : 0;
+}
+
+int dut_reopen(struct dut *d)
+{
+    rtnl_close(&d->rth);
+    if (setns(d->netns, CLONE_NEWNET))
+        return -1;
+    return rtnl_open(&d->rth, 0) < 0 ? -1 : 0;
+}
+
+struct ports_query {
+    int master;
+    char (*names)[16];
+    int max, n;
+};
+
+static int ports_filter(struct nlmsghdr *n, void *arg)
+{
+    struct ports_query *q = arg;
+    struct ifinfomsg *ifi = NLMSG_DATA(n);
+    struct rtattr *tb[IFLA_MAX + 1];
+    int len = n->nlmsg_len - NLMSG_LENGTH(sizeof(*ifi));
+
+    if (n->nlmsg_type != RTM_NEWLINK || len < 0)
+        return 0;
+    parse_rtattr_flags(tb, IFLA_MAX, IFLA_RTA(ifi), len, NLA_F_NESTED);
+    if (tb[IFLA_MASTER] && tb[IFLA_IFNAME]
+        && (int)rta_getattr_u32(tb[IFLA_MASTER]) == q->master
+        && q->n < q->max)
+        snprintf(q->names[q->n++], 16, "%s", rta_getattr_str(tb[IFLA_IFNAME]));
+    return 0;
+}
+
+int dut_br_ports(struct dut *d, char (*names)[16], int max)
+{
+    struct ports_query q = { .names = names, .max = max };
+
+    q.master = get_ifindex(d, "br0");
+    if (q.master <= 0 || rtnl_linkdump_req(&d->rth, AF_UNSPEC) < 0
+        || rtnl_dump_filter(&d->rth, ports_filter, &q) < 0)
+        return -1;
+    return q.n;
+}
+
+int vnb_set_link(struct vnb *n, bool up)
+{
+    return rth_set_link(&base_rth, n->ifname, up, 0);
+}
+
+int dut_log_count(struct dut *d, const char *needle)
+{
+    char line[1024];
+    int count = 0;
+    FILE *f = fopen(d->log, "r");
+
+    if (!f)
+        return -1;
+    /* mstpd lines start with a timestamp; mstpctl messages do not */
+    while (fgets(line, sizeof(line), f))
+        if (line[0] >= '0' && line[0] <= '9' && strcasestr(line, needle))
+            count++;
+    fclose(f);
+    return count;
 }

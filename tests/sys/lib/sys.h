@@ -54,6 +54,10 @@ struct dut {
  * when ready; otherwise sys_skip_reason() tells why. */
 int sys_init(void);
 const char *sys_skip_reason(void);
+/* Host mode, for tests that need the init network namespace (kernel STP
+ * helper): no namespaces; only as root with FTEST_VM=1 (make check-sys-vm
+ * runs the tests in a virtme-ng VM) */
+int sys_init_host(void);
 /* skip() the current test if the environment is not ready */
 void sys_require(void);
 
@@ -65,6 +69,10 @@ int dut_link(struct dut *a, const char *aport, struct dut *b, const char *bport)
 /* start mstpd, add br0, set the harness timers, then bring the br0 ports
  * up (so that port timers start from the harness values) */
 int dut_start(struct dut *d);
+/* start mstpd only and wait until it answers */
+int dut_start_mstpd(struct dut *d);
+/* bring the br0 ports up (done by dut_start()) */
+int dut_ports_up(struct dut *d);
 /* stop mstpd and release the namespace (its veth ends go away) */
 void dut_destroy(struct dut *d);
 
@@ -91,6 +99,32 @@ int dut_link_flags(struct dut *d, const char *ifname);
 /* 1 if the FDB of br0 has mac on port, 0 if not, -1 on error */
 int dut_fdb_has(struct dut *d, const char *port, const unsigned char *mac);
 
+/* lines of the mstpd log containing needle (case-insensitive) */
+int dut_log_count(struct dut *d, const char *needle);
+/* br0 ports in the kernel; returns their number, -1 on error */
+int dut_br_ports(struct dut *d, char (*names)[16], int max);
+/* new dummy interface in br0, up; delete an interface */
+int dut_add_dummy(struct dut *d, const char *ifname);
+int dut_del_link(struct dut *d, const char *ifname);
+/* in a child process: own rtnetlink socket in the DUT namespace */
+int dut_reopen(struct dut *d);
+
+/* Host mode only */
+/* install the build's bridge-stp as /sbin/bridge-stp, with $MSTPD and
+ * $MSTPCTL; $BRIDGE_STP (default ./bridge-stp) */
+int sys_install_helper(void);
+/* kill every mstpd process; tell whether one runs */
+void sys_kill_mstpd(void);
+bool sys_mstpd_running(void);
+/* DUT in the init namespace: br0 created with STP on or off; returns
+ * SYS_BLOCKED if the request is still blocked after timeout_ms */
+int dut_create_host(struct dut *d, const char *name, unsigned char mac_last,
+                    bool stp, long timeout_ms);
+/* STP on/off on br0 (the kernel calls the helper); SYS_BLOCKED if blocked */
+int dut_set_stp(struct dut *d, bool on, long timeout_ms);
+/* kernel stp_state of br0: 0 off, 1 kernel STP, 2 user STP; -1 on error */
+int dut_stp_state(struct dut *d);
+
 /* Virtual neighbour: the far end of a veth pair whose near end is a br0
  * port of a DUT; it sends crafted BPDUs and frames and captures the BPDUs of
  * the DUT through an AF_PACKET socket. Its MAC is 02:00:00:00:01:<mac_last>. */
@@ -113,6 +147,8 @@ int vnb_send_frame(struct vnb *n, const void *frame, size_t len);
 int vnb_send_periodic(struct vnb *n, const void *bpdu, size_t len,
                       int period_ms);
 void vnb_stop(struct vnb *n);
+/* administrative state of the neighbour end (carrier of the DUT port) */
+int vnb_set_link(struct vnb *n, bool up);
 /* next BPDU sent by the DUT; returns its length, -1 on timeout (a zero
  * timeout returns a BPDU already queued, if any) */
 int vnb_recv(struct vnb *n, void *bpdu, size_t len, long timeout_ms);
