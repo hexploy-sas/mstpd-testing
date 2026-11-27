@@ -142,7 +142,7 @@ tests_test_sim_stp_interop_LDADD = $(CMOCKA_LIBS)
 # ftest-sys: real mstpd and mstpctl against the kernel bridge, run by
 # make check-sys (needs kernel >= 7.1 and user namespaces, or root)
 SYS_TESTS = tests/sys/ftest_ring tests/sys/ftest_neighbour \
-	tests/sys/ftest_ports tests/sys/ftest_helper
+	tests/sys/ftest_ports tests/sys/ftest_access tests/sys/ftest_helper
 EXTRA_PROGRAMS = $(SYS_TESTS)
 SYS_LIB = tests/sys/lib/sys.c tests/sys/lib/sys.h tests/stp_params.h \
 	libnetlink.c
@@ -161,6 +161,11 @@ tests_sys_ftest_ports_SOURCES = $(SYS_LIB) tests/sys/ftest_ports.c
 tests_sys_ftest_ports_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS) \
 	-I$(srcdir)/tests/sys/lib -I$(srcdir)/tests
 tests_sys_ftest_ports_LDADD = $(CMOCKA_LIBS)
+
+tests_sys_ftest_access_SOURCES = $(SYS_LIB) tests/sys/ftest_access.c
+tests_sys_ftest_access_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS) \
+	-I$(srcdir)/tests/sys/lib -I$(srcdir)/tests
+tests_sys_ftest_access_LDADD = $(CMOCKA_LIBS)
 
 tests_sys_ftest_helper_SOURCES = $(SYS_LIB) tests/sys/ftest_helper.c
 tests_sys_ftest_helper_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS) \

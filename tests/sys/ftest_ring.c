@@ -124,6 +124,15 @@ static void assert_root_is_dut0(struct ring *r)
     }
 }
 
+/* stop the 3 mstpd: no sanitizer report (ASan/UBSan builds) */
+static void stop_all(struct ring *r)
+{
+    int i;
+
+    for (i = 0; i < NUM_DUTS; i++)
+        assert_int_equal(dut_stop(&r->d[i]), 0);
+}
+
 static long converge(struct ring *r)
 {
     struct expect_set s = { r, nominal, ARRAY_SIZE(nominal) };
@@ -144,6 +153,7 @@ static void ring_converges(void **state)
     sys_require();
     ms = converge(*state);
     print_message("converged in %ld ms\n", ms);
+    stop_all(*state);
 }
 
 /* Root port link of dut2 cut: dut2 e1 becomes root port and forwards;
@@ -163,6 +173,27 @@ static void ring_link_cut(void **state)
     assert_roles(&s);
     assert_root_is_dut0(r);
     print_message("failover in %ld ms\n", ms);
+    stop_all(r);
+}
+
+/* Convergence, link cut and link restore: no kernel state change refused,
+ * no error logged by any mstpd */
+static void ring_no_state_errors(void **state)
+{
+    struct ring *r = *state;
+    struct expect_set c = { r, cut, ARRAY_SIZE(cut) };
+    int i;
+
+    sys_require();
+    converge(r);
+    assert_int_equal(dut_set_link(&r->d[2], "e2", false), 0);
+    assert_true(sys_wait(states_match, &c, FAILOVER_MS) >= 0);
+    assert_int_equal(dut_set_link(&r->d[2], "e2", true), 0);
+    converge(r);
+
+    for (i = 0; i < NUM_DUTS; i++)
+        assert_int_equal(dut_log_count(&r->d[i], "error"), 0);
+    stop_all(r);
 }
 
 int main(int argc, char *argv[])
@@ -170,6 +201,7 @@ int main(int argc, char *argv[])
     const struct CMUnitTest tests[] = {
         cmocka_unit_test_setup_teardown(ring_converges, setup, teardown),
         cmocka_unit_test_setup_teardown(ring_link_cut, setup, teardown),
+        cmocka_unit_test_setup_teardown(ring_no_state_errors, setup, teardown),
     };
 
     sys_init();

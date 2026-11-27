@@ -25,6 +25,12 @@
 #define GARBAGE_FRAMES 200
 /* time for mstpd to process the frames sent */
 #define PROCESS_MS 500
+/* BPDU transmit rate */
+#define TX_HOLD 3
+#define CHANGE_PERIOD_MS 50
+#define ALT_COST 1000
+#define OBSERVE_S 5
+#define MAX_CAPTURED 256
 
 #define DESIGNATED (BPDU_FLAGS_ROLE_SET(encodedRoleDesignated) \
                     | (1 << offsetLearnig) | (1 << offsetForwarding))
@@ -381,6 +387,56 @@ static void nb_tc_flushes_other_ports(void **state)
     assert_int_equal(dut_fdb_has(&t->d, "e1", mac_y), 1);
 }
 
+/* BPDU transmit rate: the root info from A changes every CHANGE_PERIOD_MS;
+ * the DUT sends at most Transmit Hold Count BPDUs at once on e2, then one
+ * per second (txCount decrements every second) */
+static void nb_tx_rate(void **state)
+{
+    struct topo *t = *state;
+    unsigned char b1[sizeof(bpdu_t)], b2[sizeof(bpdu_t)], rx[sizeof(bpdu_t)];
+    long times[MAX_CAPTURED], start, end;
+    char hold[8];
+    int n = 0, i, j, max_1s = 0;
+    struct port_check root[] = {
+        { &t->d, "e1", "Root", BR_STATE_FORWARDING, NULL },
+        { NULL }
+    };
+
+    sys_require();
+    wait_edge_ports(t);
+    snprintf(hold, sizeof(hold), "%d", TX_HOLD);
+    assert_int_equal(dut_ctl(&t->d, NULL, 0, "settxholdcount", "br0", hold,
+                             (char *)NULL), 0);
+
+    /* each change of root path cost gives new designated info on e2 */
+    vnb_make_bpdu(b1, DESIGNATED, A_PRIO, A_MAC, 0, A_PRIO, A_MAC);
+    vnb_make_bpdu(b2, DESIGNATED, A_PRIO, A_MAC, ALT_COST, A_PRIO, A_MAC);
+    assert_int_equal(vnb_send_alternating(&t->a, b1, b2, RST_BPDU_SIZE,
+                                          CHANGE_PERIOD_MS), 0);
+    assert_ports(root, CONVERGE_MS);
+
+    while (vnb_recv(&t->b, rx, sizeof(rx), 0) >= 0)
+        ;
+    start = sys_now_ms();
+    end = start + OBSERVE_S * 1000;
+    while (sys_now_ms() < end && n < MAX_CAPTURED)
+        if (vnb_recv(&t->b, rx, sizeof(rx), end - sys_now_ms()) >= 0)
+            times[n++] = sys_now_ms() - start;
+    vnb_stop(&t->a);
+
+    for (i = 0; i < n; i++) {
+        for (j = i; j < n && times[j] - times[i] < 1000; j++)
+            ;
+        if (j - i > max_1s)
+            max_1s = j - i;
+    }
+    print_message("%d BPDUs in %d s, at most %d in 1 s\n", n, OBSERVE_S,
+                  max_1s);
+    assert_true(n >= OBSERVE_S);
+    assert_true(n <= TX_HOLD + OBSERVE_S);
+    assert_true(max_1s <= TX_HOLD + 1);
+}
+
 int main(int argc, char *argv[])
 {
     const struct CMUnitTest tests[] = {
@@ -389,6 +445,7 @@ int main(int argc, char *argv[])
         cmocka_unit_test_setup_teardown(nb_bpdu_guard, setup, teardown),
         cmocka_unit_test_setup_teardown(nb_tc_flushes_other_ports, setup,
                                         teardown),
+        cmocka_unit_test_setup_teardown(nb_tx_rate, setup, teardown),
     };
 
     sys_init();

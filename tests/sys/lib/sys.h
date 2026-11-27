@@ -60,6 +60,9 @@ const char *sys_skip_reason(void);
 int sys_init_host(void);
 /* skip() the current test if the environment is not ready */
 void sys_require(void);
+/* the tests run as real root (other uids can be used), not in a user
+ * namespace */
+bool sys_real_root(void);
 
 /* new DUT: namespace and bridge br0 with MAC 02:00:00:00:00:<mac_last>, up */
 int dut_create(struct dut *d, const char *name, unsigned char mac_last);
@@ -73,12 +76,17 @@ int dut_start(struct dut *d);
 int dut_start_mstpd(struct dut *d);
 /* bring the br0 ports up (done by dut_start()) */
 int dut_ports_up(struct dut *d);
+/* stop mstpd (SIGTERM, so that sanitizers report at exit); returns the
+ * number of sanitizer report lines in its log */
+int dut_stop(struct dut *d);
 /* stop mstpd and release the namespace (its veth ends go away) */
 void dut_destroy(struct dut *d);
 
 /* run mstpctl in the DUT namespace with a NULL-terminated argument list;
  * stdout goes to out (may be NULL); returns the exit code */
 int dut_ctl(struct dut *d, char *out, size_t outlen, ...);
+/* same, with mstpctl running as uid (needs real root) */
+int dut_ctl_as(struct dut *d, int uid, char *out, size_t outlen, ...);
 /* administrative state of an interface in the DUT */
 int dut_set_link(struct dut *d, const char *ifname, bool up);
 
@@ -89,6 +97,8 @@ int dut_port_param(struct dut *d, const char *port, const char *key,
                    char *val, size_t len);
 /* port role from mstpctl ("Root", "Designated", "Alternate", ...) */
 int dut_port_role(struct dut *d, const char *port, char *role, size_t len);
+/* value of a showbridge JSON field, e.g. "bridge-max-age" */
+int dut_bridge_param(struct dut *d, const char *key, char *val, size_t len);
 /* bridge ID and designated root from mstpctl, as printed */
 int dut_bridge_ids(struct dut *d, char *bridge_id, char *root_id, size_t len);
 
@@ -111,11 +121,19 @@ int dut_reopen(struct dut *d);
 
 /* Host mode only */
 /* install the build's bridge-stp as /sbin/bridge-stp, with $MSTPD and
- * $MSTPCTL; $BRIDGE_STP (default ./bridge-stp) */
-int sys_install_helper(void);
+ * $MSTPCTL, and config_cmd if not NULL (the per-bridge configuration
+ * command run by "bridge-stp restart"); $BRIDGE_STP (default ./bridge-stp) */
+int sys_install_helper(const char *config_cmd);
 /* kill every mstpd process; tell whether one runs */
 void sys_kill_mstpd(void);
 bool sys_mstpd_running(void);
+/* pid of an mstpd process, 0 if none */
+int sys_mstpd_pid(void);
+/* log directory of the harness */
+const char *sys_logdir(void);
+/* run a program (argv[0] is its path), output appended to log; returns its
+ * exit code, or SYS_BLOCKED after timeout_ms */
+int sys_run(const char *const argv[], const char *log, long timeout_ms);
 /* DUT in the init namespace: br0 created with STP on or off; returns
  * SYS_BLOCKED if the request is still blocked after timeout_ms */
 int dut_create_host(struct dut *d, const char *name, unsigned char mac_last,
@@ -143,6 +161,10 @@ int vnb_link(struct vnb *n, const char *name, unsigned char mac_last,
 int vnb_send(struct vnb *n, const void *bpdu, size_t len);
 /* any Ethernet frame (header included) */
 int vnb_send_frame(struct vnb *n, const void *frame, size_t len);
+/* send bpdu1, then every period_ms bpdu2 and bpdu1 in turn, until
+ * vnb_stop() */
+int vnb_send_alternating(struct vnb *n, const void *bpdu1,
+                         const void *bpdu2, size_t len, int period_ms);
 /* send a BPDU now and then every period_ms until vnb_stop() */
 int vnb_send_periodic(struct vnb *n, const void *bpdu, size_t len,
                       int period_ms);
@@ -152,6 +174,9 @@ int vnb_set_link(struct vnb *n, bool up);
 /* next BPDU sent by the DUT; returns its length, -1 on timeout (a zero
  * timeout returns a BPDU already queued, if any) */
 int vnb_recv(struct vnb *n, void *bpdu, size_t len, long timeout_ms);
+/* same, and the source MAC of the frame */
+int vnb_recv_from(struct vnb *n, void *bpdu, size_t len, unsigned char *src,
+                  long timeout_ms);
 void vnb_destroy(struct vnb *n);
 /* RST BPDU (bpdu_t) from designated port 1 (default priority) of bridge
  * (bridge_prio, 02:00:00:00:00:<bridge_mac_last>) with root

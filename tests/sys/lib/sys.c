@@ -39,10 +39,19 @@
 
 static bool ready;
 static bool host_mode;
+static bool real_root;
 static const char *skip_reason = "environment not initialised";
 static int base_netns = -1;
 static struct rtnl_handle base_rth;
 static char logdir[200];
+
+/* ASan builds: the test process is pid 1 of its pid namespace and cannot
+ * start the leak checker when it exits; leaks are checked in mstpd */
+const char *__asan_default_options(void);
+const char *__asan_default_options(void)
+{
+    return "detect_leaks=0";
+}
 
 /* logging for libnetlink.c */
 int log_level = LOG_LEVEL_ERROR;
@@ -92,7 +101,8 @@ int sys_init(void)
     pid_t pid;
     int status;
 
-    if (geteuid() != 0)
+    real_root = geteuid() == 0;
+    if (!real_root)
         flags |= CLONE_NEWUSER;
     if (unshare(flags))
         return not_ready("cannot create namespaces (unprivileged user "
@@ -150,6 +160,7 @@ int sys_init_host(void)
     if (mkdir(logdir, 0755) && errno != EEXIST)
         return not_ready("cannot create log directory");
     host_mode = true;
+    real_root = true;
     ready = true;
     return 0;
 }
@@ -357,21 +368,19 @@ static const char *bin(const char *env, const char *def)
     return p ? p : def;
 }
 
-int dut_ctl(struct dut *d, char *out, size_t outlen, ...)
+static int vdut_ctl(struct dut *d, int uid, char *out, size_t outlen,
+                    va_list ap)
 {
     const char *argv[MAX_ARGS + 2];
     int pipefd[2], argc = 0, status, fd;
     size_t len = 0;
     ssize_t n;
-    va_list ap;
     pid_t pid;
     char sink[256];
 
     argv[argc++] = "mstpctl";
-    va_start(ap, outlen);
     while (argc <= MAX_ARGS && (argv[argc] = va_arg(ap, const char *)))
         argc++;
-    va_end(ap);
     argv[argc] = NULL;
 
     if (pipe(pipefd))
@@ -388,6 +397,8 @@ int dut_ctl(struct dut *d, char *out, size_t outlen, ...)
         fd = open(d->log, O_WRONLY | O_CREAT | O_APPEND, 0644);
         if (fd >= 0)
             dup2(fd, STDERR_FILENO);
+        if (uid >= 0 && (setgid(uid) || setuid(uid)))
+            _exit(126);
         execv(bin("MSTPCTL", "./mstpctl"), (char *const *)argv);
         _exit(127);
     }
@@ -405,8 +416,32 @@ int dut_ctl(struct dut *d, char *out, size_t outlen, ...)
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
+int dut_ctl(struct dut *d, char *out, size_t outlen, ...)
+{
+    va_list ap;
+    int r;
+
+    va_start(ap, outlen);
+    r = vdut_ctl(d, -1, out, outlen, ap);
+    va_end(ap);
+    return r;
+}
+
+int dut_ctl_as(struct dut *d, int uid, char *out, size_t outlen, ...)
+{
+    va_list ap;
+    int r;
+
+    va_start(ap, outlen);
+    r = vdut_ctl(d, uid, out, outlen, ap);
+    va_end(ap);
+    return r;
+}
+
 int dut_start_mstpd(struct dut *d)
 {
+    const char *opts;
+    char asan[256];
     long start;
     int fd;
 
@@ -420,6 +455,11 @@ int dut_start_mstpd(struct dut *d)
             dup2(fd, STDOUT_FILENO);
             dup2(fd, STDERR_FILENO);
         }
+        /* ASan builds: stdbuf preloads a library before the ASan runtime */
+        opts = getenv("ASAN_OPTIONS");
+        snprintf(asan, sizeof(asan), "%s%sverify_asan_link_order=0",
+                 opts ? opts : "", opts && *opts ? ":" : "");
+        setenv("ASAN_OPTIONS", asan, 1);
         /* line-buffered output, so that the log is complete while mstpd
          * runs */
         execlp("stdbuf", "stdbuf", "-oL", "-eL", bin("MSTPD", "./mstpd"),
@@ -467,6 +507,27 @@ int dut_ports_up(struct dut *d)
         if (set_link(d, d->ports[i], true, 0))
             return -1;
     return 0;
+}
+
+int dut_stop(struct dut *d)
+{
+    char line[1024];
+    int reports = 0;
+    FILE *f;
+
+    if (d->mstpd > 0) {
+        kill(d->mstpd, SIGTERM);
+        waitpid(d->mstpd, NULL, 0);
+        d->mstpd = 0;
+    }
+    f = fopen(d->log, "r");
+    if (!f)
+        return 0;
+    while (fgets(line, sizeof(line), f))
+        if (strstr(line, "Sanitizer") || strstr(line, "runtime error:"))
+            reports++;
+    fclose(f);
+    return reports;
 }
 
 void dut_destroy(struct dut *d)
@@ -552,6 +613,16 @@ int dut_port_param(struct dut *d, const char *port, const char *key,
 int dut_port_role(struct dut *d, const char *port, char *role, size_t len)
 {
     return dut_port_param(d, port, "role", role, len);
+}
+
+int dut_bridge_param(struct dut *d, const char *key, char *val, size_t len)
+{
+    char out[4096];
+
+    if (dut_ctl(d, out, sizeof(out), "-f", "json", "showbridge", "br0",
+                (char *)NULL))
+        return -1;
+    return json_value(out, key, val, len);
 }
 
 int dut_bridge_ids(struct dut *d, char *bridge_id, char *root_id, size_t len)
@@ -707,22 +778,30 @@ int vnb_send(struct vnb *n, const void *bpdu, size_t len)
     return vnb_send_frame(n, f, FRAME_HLEN + len);
 }
 
-int vnb_send_periodic(struct vnb *n, const void *bpdu, size_t len,
-                      int period_ms)
+int vnb_send_alternating(struct vnb *n, const void *bpdu1,
+                         const void *bpdu2, size_t len, int period_ms)
 {
+    int i;
+
     vnb_stop(n);
-    if (vnb_send(n, bpdu, len))
+    if (vnb_send(n, bpdu1, len))
         return -1;
     n->sender = fork();
     if (n->sender < 0)
         return -1;
     if (n->sender == 0) {
-        for (;;) {
+        for (i = 1;; i++) {
             usleep(period_ms * 1000);
-            vnb_send(n, bpdu, len);
+            vnb_send(n, i % 2 ? bpdu2 : bpdu1, len);
         }
     }
     return 0;
+}
+
+int vnb_send_periodic(struct vnb *n, const void *bpdu, size_t len,
+                      int period_ms)
+{
+    return vnb_send_alternating(n, bpdu, bpdu, len, period_ms);
 }
 
 void vnb_stop(struct vnb *n)
@@ -735,6 +814,12 @@ void vnb_stop(struct vnb *n)
 }
 
 int vnb_recv(struct vnb *n, void *bpdu, size_t len, long timeout_ms)
+{
+    return vnb_recv_from(n, bpdu, len, NULL, timeout_ms);
+}
+
+int vnb_recv_from(struct vnb *n, void *bpdu, size_t len, unsigned char *src,
+                  long timeout_ms)
 {
     unsigned char f[ETH_FRAME_LEN];
     struct sockaddr_ll sll;
@@ -761,6 +846,8 @@ int vnb_recv(struct vnb *n, void *bpdu, size_t len, long timeout_ms)
         if (l > len)
             l = len;
         memcpy(bpdu, f + FRAME_HLEN, l);
+        if (src)
+            memcpy(src, f + ETH_ALEN, ETH_ALEN);
         return l;
     }
     return -1;
@@ -815,7 +902,7 @@ void vnb_make_bpdu(void *buf, unsigned int flags, uint16_t root_prio,
 #define HELPER_PATH "/sbin/bridge-stp"
 
 /* the build's bridge-stp with the mstpd and mstpctl paths of the build */
-int sys_install_helper(void)
+int sys_install_helper(const char *config_cmd)
 {
     const char *src = bin("BRIDGE_STP", "./bridge-stp");
     char line[512], path[PATH_MAX];
@@ -839,6 +926,8 @@ int sys_install_helper(void)
         else if (!strncmp(line, "mstpd=", 6))
             fprintf(out, "mstpd='%s'\n",
                     realpath(bin("MSTPD", "./mstpd"), path));
+        else if (config_cmd && !strncmp(line, "config_cmd=", 11))
+            fprintf(out, "config_cmd='%s'\n", config_cmd);
         else
             fputs(line, out);
     }
@@ -1112,4 +1201,67 @@ int dut_log_count(struct dut *d, const char *needle)
             count++;
     fclose(f);
     return count;
+}
+
+int sys_mstpd_pid(void)
+{
+    char path[64], comm[32];
+    struct dirent *e;
+    int pid, found = 0;
+    DIR *dir;
+    FILE *f;
+
+    dir = opendir("/proc");
+    if (!dir)
+        return 0;
+    while (!found && (e = readdir(dir))) {
+        pid = atoi(e->d_name);
+        if (pid <= 0)
+            continue;
+        snprintf(path, sizeof(path), "/proc/%d/comm", pid);
+        f = fopen(path, "r");
+        if (!f)
+            continue;
+        if (fgets(comm, sizeof(comm), f) && !strcmp(comm, "mstpd\n"))
+            found = pid;
+        fclose(f);
+    }
+    closedir(dir);
+    return found;
+}
+
+const char *sys_logdir(void)
+{
+    return logdir;
+}
+
+int sys_run(const char *const argv[], const char *log, long timeout_ms)
+{
+    long start = sys_now_ms();
+    int status, fd;
+    pid_t pid;
+
+    pid = fork();
+    if (pid < 0)
+        return -1;
+    if (pid == 0) {
+        fd = open(log, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (fd >= 0) {
+            dup2(fd, STDOUT_FILENO);
+            dup2(fd, STDERR_FILENO);
+        }
+        execv(argv[0], (char *const *)argv);
+        _exit(127);
+    }
+    while (waitpid(pid, &status, WNOHANG) == 0) {
+        if (sys_now_ms() - start > timeout_ms)
+            return SYS_BLOCKED;
+        usleep(SYS_POLL_MS * 1000);
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+bool sys_real_root(void)
+{
+    return real_root;
 }
