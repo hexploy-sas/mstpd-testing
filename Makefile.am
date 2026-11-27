@@ -40,6 +40,7 @@ check_PROGRAMS = \
 	tests/test_p2p \
 	tests/test_bridge_track \
 	tests/test_brmon \
+	tests/test_mstpctl \
 	tests/test_sim_rstp_ring \
 	tests/test_sim_dual_homed \
 	tests/test_sim_line \
@@ -116,6 +117,11 @@ tests_test_brmon_SOURCES = tests/test_brmon.c tests/sys_fake.c tests/sys_fake.h 
 tests_test_brmon_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
 tests_test_brmon_LDFLAGS = -Wl,--wrap=rtnl_talk,--wrap=open
 tests_test_brmon_LDADD = $(CMOCKA_LIBS)
+
+tests_test_mstpctl_SOURCES = tests/test_mstpctl.c tests/ctl_fake.c tests/ctl_fake.h
+tests_test_mstpctl_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_mstpctl_LDFLAGS = -Wl,--wrap=exit,--wrap=if_nametoindex
+tests_test_mstpctl_LDADD = $(CMOCKA_LIBS)
 
 tests_test_sim_rstp_ring_SOURCES = $(TEST_COMMON) tests/test_sim_rstp_ring.c
 tests_test_sim_rstp_ring_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
