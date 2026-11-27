@@ -49,9 +49,27 @@ void set_port_state(port_t *port, bool up, int speed, bool duplex);
 void port_rx_bpdu(port_t *p, const void *data, size_t len);
 /* return the BPDU last transmitted from that port */
 int port_last_tx_bpdu(port_t *p, bpdu_t **data, size_t *len);
+/* number of TCN BPDUs transmitted from that port */
+int port_num_tx_tcn_bpdu(port_t *p);
+/* number of BPDUs transmitted from that port */
+int port_num_tx_bpdu(port_t *p);
+/* number of MSTP_OUT_flush_all_fids() calls on that port, all trees */
+int port_num_flush(port_t *p);
+/* number of MSTP_OUT_shutdown_port() calls on that port */
+int port_num_shutdown(port_t *p);
+/* number of MSTP_OUT_set_ageing_time() calls on that port, and last value */
+int port_num_set_ageing(port_t *p, unsigned int *last_ageing_time);
+/* build a BPDU from a neighbour claiming to be root with (prio, mac), path
+ * cost 0, port 1 with default priority, Message Age 0, default times */
+void make_bpdu(bpdu_t *b, __u8 version, __u8 type, __u16 prio, __u64 mac,
+               __u8 flags);
+/* drop RST BPDUs received on that port, as an 802.1D-1998 bridge does */
+void port_set_drop_rx_rst(port_t *p, bool drop);
 /* clears the last transmitted BPDU */
 void port_reset_last_tx_bpdu(port_t *p);
 /* advances the time of all bridges by one tick (second) */
 void test_one_second(void **state);
+/* advances the time of all bridges by n ticks */
+void test_ticks(void **state, int n);
 
 #endif

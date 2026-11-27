@@ -28,10 +28,28 @@ check_PROGRAMS = \
 	tests/test_digest \
 	tests/test_portcost \
 	tests/test_mst_tcn_discarding \
+	tests/test_migration \
+	tests/test_bridge_config \
+	tests/test_priority_vector \
+	tests/test_bpdu_rx \
+	tests/test_bpdu_tx \
+	tests/test_edge \
+	tests/test_guards \
+	tests/test_topology_change \
+	tests/test_timers \
+	tests/test_p2p \
+	tests/test_bridge_track \
+	tests/test_brmon \
+	tests/test_mstpctl \
+	tests/test_sim_rstp_ring \
+	tests/test_sim_dual_homed \
+	tests/test_sim_line \
+	tests/test_sim_stp_interop \
 	$(NULL)
 TESTS = $(check_PROGRAMS)
 
-TEST_COMMON = tests/common.c tests/common.h hmac_md5.c mstp.c mstp.h
+TEST_COMMON = tests/common.c tests/common.h tests/stp_params.h hmac_md5.c \
+	mstp.c mstp.h
 
 tests_test_digest_SOURCES = $(TEST_COMMON) tests/test_digest.c
 tests_test_digest_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
@@ -45,12 +63,142 @@ tests_test_mst_tcn_discarding_SOURCES = $(TEST_COMMON) tests/test_mst_tcn_discar
 tests_test_mst_tcn_discarding_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
 tests_test_mst_tcn_discarding_LDADD = $(CMOCKA_LIBS)
 
-EXTRA_DIST = bridge-stp.in utils/ifupdown.sh.in utils/mstp_config_bridge.in \
+tests_test_migration_SOURCES = $(TEST_COMMON) tests/test_migration.c
+tests_test_migration_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_migration_LDADD = $(CMOCKA_LIBS)
+
+tests_test_bridge_config_SOURCES = $(TEST_COMMON) tests/test_bridge_config.c
+tests_test_bridge_config_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_bridge_config_LDADD = $(CMOCKA_LIBS)
+
+tests_test_priority_vector_SOURCES = $(TEST_COMMON) tests/test_priority_vector.c
+tests_test_priority_vector_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_priority_vector_LDADD = $(CMOCKA_LIBS)
+
+tests_test_bpdu_rx_SOURCES = $(TEST_COMMON) tests/test_bpdu_rx.c
+tests_test_bpdu_rx_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_bpdu_rx_LDADD = $(CMOCKA_LIBS)
+
+tests_test_bpdu_tx_SOURCES = $(TEST_COMMON) tests/test_bpdu_tx.c
+tests_test_bpdu_tx_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_bpdu_tx_LDADD = $(CMOCKA_LIBS)
+
+tests_test_edge_SOURCES = $(TEST_COMMON) tests/test_edge.c
+tests_test_edge_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_edge_LDADD = $(CMOCKA_LIBS)
+
+tests_test_guards_SOURCES = $(TEST_COMMON) tests/test_guards.c
+tests_test_guards_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_guards_LDADD = $(CMOCKA_LIBS)
+
+tests_test_topology_change_SOURCES = $(TEST_COMMON) tests/test_topology_change.c
+tests_test_topology_change_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_topology_change_LDADD = $(CMOCKA_LIBS)
+
+tests_test_timers_SOURCES = $(TEST_COMMON) tests/test_timers.c
+tests_test_timers_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_timers_LDADD = $(CMOCKA_LIBS)
+
+tests_test_p2p_SOURCES = $(TEST_COMMON) tests/test_p2p.c
+tests_test_p2p_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_p2p_LDADD = $(CMOCKA_LIBS)
+
+TEST_SYS = tests/sys_fake.c tests/sys_fake.h tests/stp_params.h hmac_md5.c \
+	mstp.c mstp.h \
+	driver_deps.c libnetlink.c
+
+tests_test_bridge_track_SOURCES = $(TEST_SYS) bridge_track.c tests/test_bridge_track.c
+tests_test_bridge_track_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_bridge_track_LDFLAGS = -Wl,--wrap=rtnl_talk,--wrap=open
+tests_test_bridge_track_LDADD = $(CMOCKA_LIBS)
+
+tests_test_brmon_SOURCES = tests/test_brmon.c tests/sys_fake.c tests/sys_fake.h \
+	libnetlink.c
+tests_test_brmon_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_brmon_LDFLAGS = -Wl,--wrap=rtnl_talk,--wrap=open
+tests_test_brmon_LDADD = $(CMOCKA_LIBS)
+
+tests_test_mstpctl_SOURCES = tests/test_mstpctl.c tests/ctl_fake.c tests/ctl_fake.h
+tests_test_mstpctl_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_mstpctl_LDFLAGS = -Wl,--wrap=exit,--wrap=if_nametoindex
+tests_test_mstpctl_LDADD = $(CMOCKA_LIBS)
+
+tests_test_sim_rstp_ring_SOURCES = $(TEST_COMMON) tests/test_sim_rstp_ring.c
+tests_test_sim_rstp_ring_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_sim_rstp_ring_LDADD = $(CMOCKA_LIBS)
+
+tests_test_sim_dual_homed_SOURCES = $(TEST_COMMON) tests/test_sim_dual_homed.c
+tests_test_sim_dual_homed_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_sim_dual_homed_LDADD = $(CMOCKA_LIBS)
+
+tests_test_sim_line_SOURCES = $(TEST_COMMON) tests/test_sim_line.c
+tests_test_sim_line_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_sim_line_LDADD = $(CMOCKA_LIBS)
+
+tests_test_sim_stp_interop_SOURCES = $(TEST_COMMON) tests/test_sim_stp_interop.c
+tests_test_sim_stp_interop_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_sim_stp_interop_LDADD = $(CMOCKA_LIBS)
+
+# ftest-sys: real mstpd and mstpctl against the kernel bridge, run by
+# make check-sys (needs kernel >= 7.1 and user namespaces, or root)
+SYS_TESTS = tests/sys/ftest_ring tests/sys/ftest_neighbour \
+	tests/sys/ftest_ports tests/sys/ftest_access tests/sys/ftest_helper
+EXTRA_PROGRAMS = $(SYS_TESTS)
+SYS_LIB = tests/sys/lib/sys.c tests/sys/lib/sys.h tests/stp_params.h \
+	libnetlink.c
+
+tests_sys_ftest_ring_SOURCES = $(SYS_LIB) tests/sys/ftest_ring.c
+tests_sys_ftest_ring_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS) \
+	-I$(srcdir)/tests/sys/lib -I$(srcdir)/tests
+tests_sys_ftest_ring_LDADD = $(CMOCKA_LIBS)
+
+tests_sys_ftest_neighbour_SOURCES = $(SYS_LIB) tests/sys/ftest_neighbour.c
+tests_sys_ftest_neighbour_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS) \
+	-I$(srcdir)/tests/sys/lib -I$(srcdir)/tests
+tests_sys_ftest_neighbour_LDADD = $(CMOCKA_LIBS)
+
+tests_sys_ftest_ports_SOURCES = $(SYS_LIB) tests/sys/ftest_ports.c
+tests_sys_ftest_ports_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS) \
+	-I$(srcdir)/tests/sys/lib -I$(srcdir)/tests
+tests_sys_ftest_ports_LDADD = $(CMOCKA_LIBS)
+
+tests_sys_ftest_access_SOURCES = $(SYS_LIB) tests/sys/ftest_access.c
+tests_sys_ftest_access_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS) \
+	-I$(srcdir)/tests/sys/lib -I$(srcdir)/tests
+tests_sys_ftest_access_LDADD = $(CMOCKA_LIBS)
+
+tests_sys_ftest_helper_SOURCES = $(SYS_LIB) tests/sys/ftest_helper.c
+tests_sys_ftest_helper_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS) \
+	-I$(srcdir)/tests/sys/lib -I$(srcdir)/tests
+tests_sys_ftest_helper_LDADD = $(CMOCKA_LIBS)
+
+check-sys: mstpd mstpctl bridge-stp $(SYS_TESTS)
+	@fail=0; for t in $(SYS_TESTS); do \
+	  echo "== $$t"; \
+	  MSTPD=$(abs_top_builddir)/mstpd MSTPCTL=$(abs_top_builddir)/mstpctl \
+	  BRIDGE_STP=$(abs_top_builddir)/bridge-stp \
+	  FTEST_LOGDIR=$(abs_top_builddir)/ftest-logs ./$$t || fail=1; \
+	done; exit $$fail
+
+# all ftest-sys tests as root in a disposable virtme-ng VM, including those
+# that need the init network namespace (kernel STP helper)
+VNG = vng
+VNG_KERNEL = -r
+check-sys-vm: mstpd mstpctl bridge-stp $(SYS_TESTS)
+	$(VNG) $(VNG_KERNEL) --rwdir=$(abs_top_builddir) -- \
+	  env FTEST_VM=1 $(MAKE) -C $(abs_top_builddir) check-sys
+
+clean-local:
+	rm -rf ftest-logs
+
+.PHONY: check-sys check-sys-vm
+
+EXTRA_DIST = tests/sys/fetch-kernel.sh bridge-stp.in utils/ifupdown.sh.in utils/mstp_config_bridge.in \
 	utils/mstpd.service.in utils/bash_completion utils/nm-dispatcher.in \
 	README.md README.VLANs.md mstpd.spec autogen.sh
 
 CLEANFILES = bridge-stp utils/ifupdown.sh utils/mstp_config_bridge \
-	utils/mstpd.service utils/nm-dispatcher
+	utils/mstpd.service utils/nm-dispatcher $(SYS_TESTS)
 dist_utilsexec_SCRIPTS = utils/ifquery
 dist_doc_DATA = LICENSE
 utilsexec_SCRIPTS = utils/ifupdown.sh utils/mstp_config_bridge
