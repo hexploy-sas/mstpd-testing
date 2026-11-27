@@ -38,6 +38,8 @@ check_PROGRAMS = \
 	tests/test_topology_change \
 	tests/test_timers \
 	tests/test_p2p \
+	tests/test_bridge_track \
+	tests/test_brmon \
 	tests/test_sim_rstp_ring \
 	tests/test_sim_dual_homed \
 	tests/test_sim_line \
@@ -99,6 +101,21 @@ tests_test_timers_LDADD = $(CMOCKA_LIBS)
 tests_test_p2p_SOURCES = $(TEST_COMMON) tests/test_p2p.c
 tests_test_p2p_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
 tests_test_p2p_LDADD = $(CMOCKA_LIBS)
+
+TEST_SYS = tests/sys_fake.c tests/sys_fake.h tests/stp_params.h hmac_md5.c \
+	mstp.c mstp.h \
+	driver_deps.c libnetlink.c
+
+tests_test_bridge_track_SOURCES = $(TEST_SYS) bridge_track.c tests/test_bridge_track.c
+tests_test_bridge_track_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_bridge_track_LDFLAGS = -Wl,--wrap=rtnl_talk,--wrap=open
+tests_test_bridge_track_LDADD = $(CMOCKA_LIBS)
+
+tests_test_brmon_SOURCES = tests/test_brmon.c tests/sys_fake.c tests/sys_fake.h \
+	libnetlink.c
+tests_test_brmon_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_brmon_LDFLAGS = -Wl,--wrap=rtnl_talk,--wrap=open
+tests_test_brmon_LDADD = $(CMOCKA_LIBS)
 
 tests_test_sim_rstp_ring_SOURCES = $(TEST_COMMON) tests/test_sim_rstp_ring.c
 tests_test_sim_rstp_ring_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
