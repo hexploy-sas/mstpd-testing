@@ -156,12 +156,44 @@ static void migration_ignores_stp_bpdu_during_migrate_time(void **state)
     assert_false(send_rstp(p));
 }
 
+/* mcheck after the STP neighbour is gone: back to RST BPDUs for good; mcheck
+ * with the STP neighbour still there: back to STP at its next BPDU */
+static void migration_mcheck(void **state)
+{
+    port_t *p = setup_port(state, protoRSTP);
+
+    tick(state, MIGRATE_TIME + 1);
+    port_rx_bpdu(p, &inferior_config_bpdu, CONFIG_BPDU_SIZE);
+    assert_false(send_rstp(p));
+    tick(state, OBSERVE_TICKS);
+
+    /* neighbour gone */
+    assert_int_equal(MSTP_IN_port_mcheck(p), 0);
+    assert_true(send_rstp(p));
+    port_reset_last_tx_bpdu(p);
+    tick(state, HELLO_TIME);
+    assert_last_tx(p, protoRSTP, bpduTypeRST, RST_BPDU_SIZE);
+    tick(state, OBSERVE_TICKS);
+    assert_true(send_rstp(p));
+
+    /* neighbour still STP */
+    port_rx_bpdu(p, &inferior_config_bpdu, CONFIG_BPDU_SIZE);
+    assert_false(send_rstp(p));
+    tick(state, MIGRATE_TIME + 1);
+    assert_int_equal(MSTP_IN_port_mcheck(p), 0);
+    assert_true(send_rstp(p));
+    tick(state, MIGRATE_TIME + 1);
+    port_rx_bpdu(p, &inferior_config_bpdu, CONFIG_BPDU_SIZE);
+    assert_false(send_rstp(p));
+}
+
 int main(int argc, char *argv[])
 {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test_setup_teardown(migration_force_stp_tx_config, prepare_test, teardown_test),
         cmocka_unit_test_setup_teardown(migration_rx_stp_bpdu, prepare_test, teardown_test),
         cmocka_unit_test_setup_teardown(migration_ignores_stp_bpdu_during_migrate_time, prepare_test, teardown_test),
+        cmocka_unit_test_setup_teardown(migration_mcheck, prepare_test, teardown_test),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

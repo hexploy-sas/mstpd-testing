@@ -29,6 +29,15 @@ check_PROGRAMS = \
 	tests/test_portcost \
 	tests/test_mst_tcn_discarding \
 	tests/test_migration \
+	tests/test_bridge_config \
+	tests/test_priority_vector \
+	tests/test_bpdu_rx \
+	tests/test_bpdu_tx \
+	tests/test_edge \
+	tests/test_guards \
+	tests/test_topology_change \
+	tests/test_timers \
+	tests/test_p2p \
 	tests/test_sim_rstp_ring \
 	tests/test_sim_dual_homed \
 	tests/test_sim_line \
@@ -54,6 +63,42 @@ tests_test_mst_tcn_discarding_LDADD = $(CMOCKA_LIBS)
 tests_test_migration_SOURCES = $(TEST_COMMON) tests/test_migration.c
 tests_test_migration_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
 tests_test_migration_LDADD = $(CMOCKA_LIBS)
+
+tests_test_bridge_config_SOURCES = $(TEST_COMMON) tests/test_bridge_config.c
+tests_test_bridge_config_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_bridge_config_LDADD = $(CMOCKA_LIBS)
+
+tests_test_priority_vector_SOURCES = $(TEST_COMMON) tests/test_priority_vector.c
+tests_test_priority_vector_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_priority_vector_LDADD = $(CMOCKA_LIBS)
+
+tests_test_bpdu_rx_SOURCES = $(TEST_COMMON) tests/test_bpdu_rx.c
+tests_test_bpdu_rx_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_bpdu_rx_LDADD = $(CMOCKA_LIBS)
+
+tests_test_bpdu_tx_SOURCES = $(TEST_COMMON) tests/test_bpdu_tx.c
+tests_test_bpdu_tx_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_bpdu_tx_LDADD = $(CMOCKA_LIBS)
+
+tests_test_edge_SOURCES = $(TEST_COMMON) tests/test_edge.c
+tests_test_edge_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_edge_LDADD = $(CMOCKA_LIBS)
+
+tests_test_guards_SOURCES = $(TEST_COMMON) tests/test_guards.c
+tests_test_guards_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_guards_LDADD = $(CMOCKA_LIBS)
+
+tests_test_topology_change_SOURCES = $(TEST_COMMON) tests/test_topology_change.c
+tests_test_topology_change_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_topology_change_LDADD = $(CMOCKA_LIBS)
+
+tests_test_timers_SOURCES = $(TEST_COMMON) tests/test_timers.c
+tests_test_timers_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_timers_LDADD = $(CMOCKA_LIBS)
+
+tests_test_p2p_SOURCES = $(TEST_COMMON) tests/test_p2p.c
+tests_test_p2p_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_p2p_LDADD = $(CMOCKA_LIBS)
 
 tests_test_sim_rstp_ring_SOURCES = $(TEST_COMMON) tests/test_sim_rstp_ring.c
 tests_test_sim_rstp_ring_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)

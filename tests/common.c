@@ -8,6 +8,7 @@
 #include <linux/if_ether.h>
 
 #include "common.h"
+#include "stp_params.h"
 
 #include "mstp.h"
 #include "log.h"
@@ -22,6 +23,10 @@ typedef struct mock_port_s {
     int num_tx;
     int num_tx_tcn_bpdu;
     bool drop_rx_rst;
+    int num_flush;
+    int num_shutdown;
+    int num_set_ageing;
+    unsigned int last_ageing_time;
 
     struct mock_port_s *link;
 } mock_port_t;
@@ -155,6 +160,12 @@ void test_one_second(void **state)
         MSTP_IN_one_second(br);
 }
 
+void test_ticks(void **state, int n)
+{
+    while (n--)
+        test_one_second(state);
+}
+
 void link_ports(port_t *p1, port_t *p2)
 {
     mock_port_t *mp1 = (mock_port_t *)p1;
@@ -228,6 +239,57 @@ int port_num_tx_tcn_bpdu(port_t *p)
     return mp->num_tx_tcn_bpdu;
 }
 
+int port_num_tx_bpdu(port_t *p)
+{
+    mock_port_t *mp = (mock_port_t *)p;
+
+    return mp->num_tx;
+}
+
+int port_num_flush(port_t *p)
+{
+    mock_port_t *mp = (mock_port_t *)p;
+
+    return mp->num_flush;
+}
+
+int port_num_shutdown(port_t *p)
+{
+    mock_port_t *mp = (mock_port_t *)p;
+
+    return mp->num_shutdown;
+}
+
+int port_num_set_ageing(port_t *p, unsigned int *last_ageing_time)
+{
+    mock_port_t *mp = (mock_port_t *)p;
+
+    if (last_ageing_time)
+        *last_ageing_time = mp->last_ageing_time;
+    return mp->num_set_ageing;
+}
+
+void make_bpdu(bpdu_t *b, __u8 version, __u8 type, __u16 prio, __u64 mac,
+               __u8 flags)
+{
+    int i;
+
+    memset(b, 0, sizeof(*b));
+    b->protocolVersion = version;
+    b->bpduType = type;
+    b->flags = flags;
+    b->cistRootID.s.priority = __cpu_to_be16(prio);
+    for (i = 5; i >= 0; i--) {
+        b->cistRootID.s.mac_address[i] = (mac & 0xffu);
+        mac >>= 8;
+    }
+    b->cistRRootID = b->cistRootID;
+    b->cistPortID = __cpu_to_be16(PORT_ID(PORT_PRIO_DEFAULT, 1));
+    b->MaxAge[0] = MAX_AGE_DEFAULT;
+    b->HelloTime[0] = HELLO_TIME;
+    b->ForwardDelay[0] = FWD_DELAY_DEFAULT;
+}
+
 void port_set_drop_rx_rst(port_t *p, bool drop)
 {
     mock_port_t *mp = (mock_port_t *)p;
@@ -277,12 +339,18 @@ void MSTP_OUT_set_state(per_tree_port_t *ptp, int new_state)
 
 void MSTP_OUT_flush_all_fids(per_tree_port_t *ptp)
 {
+    mock_port_t *mp = (mock_port_t *)ptp->port;
+
+    mp->num_flush++;
     MSTP_IN_all_fids_flushed(ptp);
 }
 
 void MSTP_OUT_set_ageing_time(port_t *prt, unsigned int ageingTime)
 {
-    /* nothing to do */
+    mock_port_t *mp = (mock_port_t *)prt;
+
+    mp->num_set_ageing++;
+    mp->last_ageing_time = ageingTime;
 }
 
 void MSTP_OUT_tx_bpdu(port_t *p, bpdu_t *bpdu, int size)
@@ -314,5 +382,7 @@ void MSTP_OUT_tx_bpdu(port_t *p, bpdu_t *bpdu, int size)
 
 void MSTP_OUT_shutdown_port(port_t *prt)
 {
-    /* nothing to do */
+    mock_port_t *mp = (mock_port_t *)prt;
+
+    mp->num_shutdown++;
 }
