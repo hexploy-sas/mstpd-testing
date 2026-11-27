@@ -193,7 +193,7 @@ clean-local:
 
 .PHONY: check-sys check-sys-vm
 
-EXTRA_DIST = bridge-stp.in utils/ifupdown.sh.in utils/mstp_config_bridge.in \
+EXTRA_DIST = tests/sys/fetch-kernel.sh bridge-stp.in utils/ifupdown.sh.in utils/mstp_config_bridge.in \
 	utils/mstpd.service.in utils/bash_completion utils/nm-dispatcher.in \
 	README.md README.VLANs.md mstpd.spec autogen.sh
 

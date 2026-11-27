@@ -1,0 +1,85 @@
+name: ftest-sys
+
+on: [ push, pull_request ]
+
+jobs:
+  ftest-sys:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # asan: mstpd built with ASan and UBSan; the tests fail on any
+        # sanitizer report in an mstpd log
+        build: [ default, asan ]
+    name: ftest-sys (${{ matrix.build }})
+    env:
+      # fixed kernel >= 7.1: IFLA_BR_STP_MODE for multi-DUT tests
+      KERNEL_VERSION: v7.1.13
+    steps:
+    - uses: actions/checkout@v4
+    - name: enable KVM
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+          | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+        ls -l /dev/kvm
+    - name: install dependencies
+      shell: bash
+      run: |
+        sudo apt-get -o Acquire::Retries=3 update
+        sudo apt-get -o Acquire::Retries=3 -y install libcmocka-dev \
+          qemu-system-x86 virtme-ng
+        vng --version
+    - name: cache kernel
+      uses: actions/cache@v4
+      with:
+        path: kernel-cache
+        key: mainline-${{ env.KERNEL_VERSION }}
+    - name: install kernel
+      shell: bash
+      run: |
+        release=$(sudo tests/sys/fetch-kernel.sh "$KERNEL_VERSION" kernel-cache)
+        echo "KERNEL_RELEASE=$release" >> "$GITHUB_ENV"
+        # vng runs as the runner user
+        sudo chmod 0644 "/boot/vmlinuz-$release"
+        ls -l "/boot/vmlinuz-$release" "/lib/modules/$release/modules.dep"
+    - name: build
+      shell: bash
+      run: |
+        ./autogen.sh
+        if [ "${{ matrix.build }}" = asan ]; then
+          ./configure CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" \
+            LDFLAGS="-fsanitize=address,undefined"
+        else
+          ./configure
+        fi
+        make -j"$(nproc)"
+        make -j"$(nproc)" tests/sys/ftest_ring tests/sys/ftest_neighbour \
+          tests/sys/ftest_ports tests/sys/ftest_helper
+    - name: ftest-sys in a VM
+      shell: bash
+      run: |
+        set -o pipefail
+        if ! make -s check-sys-vm VNG_KERNEL="-r $KERNEL_RELEASE" 2>&1 \
+             | tee check-sys.log; then
+          # last lines as an annotation, visible without the job log
+          tail -n 25 check-sys.log | sed 's/%/%25/g' \
+            | awk 'BEGIN { ORS = "%0A" } { print }' \
+            | sed 's/^/::error title=check-sys-vm::/'
+          echo
+          exit 1
+        fi
+        # per-binary results as a notice and in the job summary
+        grep -E '^== |PASSED|FAILED|SKIPPED  \] tests' check-sys.log \
+          | tee -a "$GITHUB_STEP_SUMMARY" \
+          | awk 'BEGIN { ORS = "%0A" } { print }' \
+          | sed "s/^/::notice title=ftest-sys ${{ matrix.build }} (kernel $KERNEL_RELEASE)::/"
+        echo
+    - name: upload logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ftest-logs-${{ matrix.build }}
+        path: ftest-logs/
