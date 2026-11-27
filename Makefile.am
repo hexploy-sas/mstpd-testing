@@ -139,12 +139,36 @@ tests_test_sim_stp_interop_SOURCES = $(TEST_COMMON) tests/test_sim_stp_interop.c
 tests_test_sim_stp_interop_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
 tests_test_sim_stp_interop_LDADD = $(CMOCKA_LIBS)
 
+# ftest-sys: real mstpd and mstpctl against the kernel bridge, run by
+# make check-sys (needs kernel >= 7.1 and user namespaces, or root)
+SYS_TESTS = tests/sys/ftest_ring
+EXTRA_PROGRAMS = $(SYS_TESTS)
+SYS_LIB = tests/sys/lib/sys.c tests/sys/lib/sys.h tests/stp_params.h \
+	libnetlink.c
+
+tests_sys_ftest_ring_SOURCES = $(SYS_LIB) tests/sys/ftest_ring.c
+tests_sys_ftest_ring_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS) \
+	-I$(srcdir)/tests/sys/lib -I$(srcdir)/tests
+tests_sys_ftest_ring_LDADD = $(CMOCKA_LIBS)
+
+check-sys: mstpd mstpctl $(SYS_TESTS)
+	@fail=0; for t in $(SYS_TESTS); do \
+	  echo "== $$t"; \
+	  MSTPD=$(abs_top_builddir)/mstpd MSTPCTL=$(abs_top_builddir)/mstpctl \
+	  FTEST_LOGDIR=$(abs_top_builddir)/ftest-logs ./$$t || fail=1; \
+	done; exit $$fail
+
+clean-local:
+	rm -rf ftest-logs
+
+.PHONY: check-sys
+
 EXTRA_DIST = bridge-stp.in utils/ifupdown.sh.in utils/mstp_config_bridge.in \
 	utils/mstpd.service.in utils/bash_completion utils/nm-dispatcher.in \
 	README.md README.VLANs.md mstpd.spec autogen.sh
 
 CLEANFILES = bridge-stp utils/ifupdown.sh utils/mstp_config_bridge \
-	utils/mstpd.service utils/nm-dispatcher
+	utils/mstpd.service utils/nm-dispatcher $(SYS_TESTS)
 dist_utilsexec_SCRIPTS = utils/ifquery
 dist_doc_DATA = LICENSE
 utilsexec_SCRIPTS = utils/ifupdown.sh utils/mstp_config_bridge
