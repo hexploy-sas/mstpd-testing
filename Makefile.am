@@ -28,6 +28,7 @@ check_PROGRAMS = \
 	tests/test_digest \
 	tests/test_portcost \
 	tests/test_mst_tcn_discarding \
+	tests/test_migration \
 	tests/test_sim_rstp_ring \
 	tests/test_sim_dual_homed \
 	tests/test_sim_line \
@@ -49,6 +50,10 @@ tests_test_portcost_LDADD = $(CMOCKA_LIBS)
 tests_test_mst_tcn_discarding_SOURCES = $(TEST_COMMON) tests/test_mst_tcn_discarding.c
 tests_test_mst_tcn_discarding_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
 tests_test_mst_tcn_discarding_LDADD = $(CMOCKA_LIBS)
+
+tests_test_migration_SOURCES = $(TEST_COMMON) tests/test_migration.c
+tests_test_migration_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_migration_LDADD = $(CMOCKA_LIBS)
 
 tests_test_sim_rstp_ring_SOURCES = $(TEST_COMMON) tests/test_sim_rstp_ring.c
 tests_test_sim_rstp_ring_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
