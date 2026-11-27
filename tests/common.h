@@ -49,6 +49,10 @@ void set_port_state(port_t *port, bool up, int speed, bool duplex);
 void port_rx_bpdu(port_t *p, const void *data, size_t len);
 /* return the BPDU last transmitted from that port */
 int port_last_tx_bpdu(port_t *p, bpdu_t **data, size_t *len);
+/* number of TCN BPDUs transmitted from that port */
+int port_num_tx_tcn_bpdu(port_t *p);
+/* drop RST BPDUs received on that port, as an 802.1D-1998 bridge does */
+void port_set_drop_rx_rst(port_t *p, bool drop);
 /* clears the last transmitted BPDU */
 void port_reset_last_tx_bpdu(port_t *p);
 /* advances the time of all bridges by one tick (second) */

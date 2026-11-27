@@ -20,6 +20,8 @@ typedef struct mock_port_s {
     bpdu_t last_tx_bpdu;
     size_t last_tx_bpdu_len;
     int num_tx;
+    int num_tx_tcn_bpdu;
+    bool drop_rx_rst;
 
     struct mock_port_s *link;
 } mock_port_t;
@@ -219,6 +221,20 @@ int port_last_tx_bpdu(port_t *p, bpdu_t **data, size_t *len)
 
     return 0;
 }
+int port_num_tx_tcn_bpdu(port_t *p)
+{
+    mock_port_t *mp = (mock_port_t *)p;
+
+    return mp->num_tx_tcn_bpdu;
+}
+
+void port_set_drop_rx_rst(port_t *p, bool drop)
+{
+    mock_port_t *mp = (mock_port_t *)p;
+
+    mp->drop_rx_rst = drop;
+}
+
 void port_reset_last_tx_bpdu(port_t *p)
 {
     mock_port_t *mp = (mock_port_t *)p;
@@ -278,9 +294,22 @@ void MSTP_OUT_tx_bpdu(port_t *p, bpdu_t *bpdu, int size)
     mp->last_tx_bpdu_len = size;
     mp->num_tx++;
 
+    /* same counters as the driver (bridge_track.c) */
+    ++(p->num_tx_bpdu);
+    if (bpdu->protocolVersion == protoSTP && bpdu->bpduType == bpduTypeTCN) {
+        ++(p->num_tx_tcn);
+        mp->num_tx_tcn_bpdu++;
+    } else if (bpdu->flags & (1 << offsetTc)) {
+        ++(p->num_tx_tcn);
+    }
+
     /* if linked to a port, forward it */
-    if (mp->link)
-        MSTP_IN_rx_bpdu(&mp->link->port, bpdu, size);
+    if (!mp->link)
+        return;
+    /* an 802.1D-1998 bridge does not know RST BPDUs */
+    if (mp->link->drop_rx_rst && bpdu->bpduType == bpduTypeRST)
+        return;
+    MSTP_IN_rx_bpdu(&mp->link->port, bpdu, size);
 }
 
 void MSTP_OUT_shutdown_port(port_t *prt)

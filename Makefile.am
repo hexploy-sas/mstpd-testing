@@ -29,6 +29,9 @@ check_PROGRAMS = \
 	tests/test_portcost \
 	tests/test_mst_tcn_discarding \
 	tests/test_sim_rstp_ring \
+	tests/test_sim_dual_homed \
+	tests/test_sim_line \
+	tests/test_sim_stp_interop \
 	$(NULL)
 TESTS = $(check_PROGRAMS)
 
@@ -50,6 +53,18 @@ tests_test_mst_tcn_discarding_LDADD = $(CMOCKA_LIBS)
 tests_test_sim_rstp_ring_SOURCES = $(TEST_COMMON) tests/test_sim_rstp_ring.c
 tests_test_sim_rstp_ring_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
 tests_test_sim_rstp_ring_LDADD = $(CMOCKA_LIBS)
+
+tests_test_sim_dual_homed_SOURCES = $(TEST_COMMON) tests/test_sim_dual_homed.c
+tests_test_sim_dual_homed_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_sim_dual_homed_LDADD = $(CMOCKA_LIBS)
+
+tests_test_sim_line_SOURCES = $(TEST_COMMON) tests/test_sim_line.c
+tests_test_sim_line_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_sim_line_LDADD = $(CMOCKA_LIBS)
+
+tests_test_sim_stp_interop_SOURCES = $(TEST_COMMON) tests/test_sim_stp_interop.c
+tests_test_sim_stp_interop_CFLAGS = $(CMOCKA_CFLAGS) $(mstpd_CFLAGS)
+tests_test_sim_stp_interop_LDADD = $(CMOCKA_LIBS)
 
 EXTRA_DIST = bridge-stp.in utils/ifupdown.sh.in utils/mstp_config_bridge.in \
 	utils/mstpd.service.in utils/bash_completion utils/nm-dispatcher.in \
